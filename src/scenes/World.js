@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
 import { SCENE, CANVAS, TILE, BLOCKING_TILES } from '../data/constants';
-import { Player } from '../entities/Player';
-// ── Map data  30 cols × 20 rows ───────────────────────────────────────────────
+import { Player, Ally } from '../entities/Player';
+import { Enemy } from '../entities/Enemy';
+import { BattleManager } from '../systems/BattleManager';
+import { ENEMY_DEFS } from '../data/enemies';
+// ── Map  30 × 20 ─────────────────────────────────────────────────────────────
 // 0=grass  1=water  2=rock  3=path  4=flower
 const MAP = [
     [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
@@ -25,104 +28,156 @@ const MAP = [
     [2, 0, 0, 0, 4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 2],
     [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
 ];
-const MAP_COLS = MAP[0].length; // 30
-const MAP_ROWS = MAP.length; // 20
+const COLS = MAP[0].length;
+const ROWS = MAP.length;
+// ── Spawn points [tileX, tileY, enemyKey] ────────────────────────────────────
+const ENEMY_SPAWNS = [
+    [15, 3, 'SLIME'],
+    [22, 7, 'BAT'],
+    [8, 13, 'SLIME'],
+    [20, 14, 'BAT'],
+    [25, 10, 'GOLEM'],
+];
 // ── World ─────────────────────────────────────────────────────────────────────
 export class World extends Phaser.Scene {
-    constructor() { super({ key: SCENE.WORLD }); }
+    constructor() {
+        super({ key: SCENE.WORLD });
+        this.enemies = [];
+        this.locked = false; // true while battle is running
+    }
     create() {
         this.createTilemap();
-        this.createPlayer();
+        this.createCharacters();
         this.setupCamera();
         this.setupCollision();
-        this.addNPCs();
+        this.spawnEnemies();
+        this.setupBattle();
+        this.addDecoNPCs();
         this.setupDebugHUD();
         this.cameras.main.fadeIn(400, 0, 0, 0);
     }
     // ── Tilemap ───────────────────────────────────────────────────────────────
     createTilemap() {
-        const map = this.make.tilemap({
-            data: MAP,
-            tileWidth: TILE.SIZE,
-            tileHeight: TILE.SIZE,
-        });
-        // 'world' is just a local name; 'tileset' is the Phaser texture key
+        const map = this.make.tilemap({ data: MAP, tileWidth: TILE.SIZE, tileHeight: TILE.SIZE });
         const tileset = map.addTilesetImage('world', 'tileset', TILE.SIZE, TILE.SIZE, 0, 0);
         this.wallLayer = map.createLayer(0, tileset, 0, 0);
         this.wallLayer.setDepth(0);
     }
-    // ── Player ─────────────────────────────────────────────────────────────────
-    createPlayer() {
-        // Start at tile (5, 9) – a safe grass cell near map centre
-        const tx = 5, ty = 9;
-        this.player = new Player(this, tx * TILE.SIZE + TILE.SIZE / 2, ty * TILE.SIZE + TILE.SIZE);
+    // ── Characters ────────────────────────────────────────────────────────────
+    createCharacters() {
+        const sx = 5 * TILE.SIZE + TILE.SIZE / 2;
+        const sy = 9 * TILE.SIZE + TILE.SIZE;
+        this.player = new Player(this, sx, sy);
+        this.ally = new Ally(this, sx - 18, sy);
+        this.ally.follow(this.player);
     }
-    // ── Camera ─────────────────────────────────────────────────────────────────
+    // ── Camera ────────────────────────────────────────────────────────────────
     setupCamera() {
-        const worldW = MAP_COLS * TILE.SIZE;
-        const worldH = MAP_ROWS * TILE.SIZE;
-        this.physics.world.setBounds(0, 0, worldW, worldH);
+        const ww = COLS * TILE.SIZE, wh = ROWS * TILE.SIZE;
+        this.physics.world.setBounds(0, 0, ww, wh);
         this.cameras.main
-            .setBounds(0, 0, worldW, worldH)
-            .startFollow(this.player, true, 0.10, 0.10) // lerp smoothing
+            .setBounds(0, 0, ww, wh)
+            .startFollow(this.player, true, 0.10, 0.10)
             .setRoundPixels(true);
     }
-    // ── Collision ──────────────────────────────────────────────────────────────
+    // ── Collision ─────────────────────────────────────────────────────────────
     setupCollision() {
         this.wallLayer.setCollision(BLOCKING_TILES);
         this.physics.add.collider(this.player, this.wallLayer);
+        this.physics.add.collider(this.ally, this.wallLayer);
     }
-    // ── Decorative NPCs ────────────────────────────────────────────────────────
-    addNPCs() {
-        const positions = [
-            { tx: 12, ty: 3 },
-            { tx: 20, ty: 6 },
-            { tx: 7, ty: 14 },
-        ];
-        positions.forEach(({ tx, ty }, i) => {
-            const npc = this.physics.add.sprite(tx * TILE.SIZE + TILE.SIZE / 2, ty * TILE.SIZE + TILE.SIZE, 'npc', i % 2 === 0 ? 0 : 2);
-            npc.setOrigin(0.5, 1).setDepth(8);
-            // Idle bob tween
-            this.tweens.add({
-                targets: npc,
-                y: npc.y - 1,
-                duration: 700 + i * 200,
-                yoyo: true,
-                repeat: -1,
-                ease: 'Sine.easeInOut',
+    // ── Enemies ───────────────────────────────────────────────────────────────
+    spawnEnemies() {
+        ENEMY_SPAWNS.forEach(([tx, ty, key]) => {
+            const def = ENEMY_DEFS[key];
+            if (!def)
+                return;
+            const enemy = new Enemy(this, tx * TILE.SIZE + TILE.SIZE / 2, ty * TILE.SIZE + TILE.SIZE, def);
+            this.wallLayer.setCollision(BLOCKING_TILES);
+            this.physics.add.collider(enemy, this.wallLayer);
+            this.enemies.push(enemy);
+        });
+    }
+    // ── Battle system ─────────────────────────────────────────────────────────
+    setupBattle() {
+        this.battleMgr = new BattleManager(this);
+        this.battleMgr.setCallbacks(
+        // onBattleStart: lock exploration
+        () => { this.locked = true; }, 
+        // onBattleEnd: resume exploration, restore camera follow
+        () => {
+            this.locked = false;
+            this.cameras.main.startFollow(this.player, true, 0.10, 0.10);
+            // Remove dead enemies from tracking
+            this.enemies = this.enemies.filter(e => {
+                if (e.isDead) {
+                    e.destroy();
+                    return false;
+                }
+                return true;
+            });
+        });
+        // Register overlap triggers for each enemy
+        this.enemies.forEach(enemy => {
+            this.physics.add.overlap(this.player, enemy, () => {
+                if (this.locked)
+                    return;
+                // Build BattleUnit entries for alive enemies encountered
+                // (for now: the single enemy that was touched)
+                const enemyUnit = {
+                    id: `${enemy.def.key}_${Date.now()}`,
+                    name: enemy.def.name,
+                    sprite: enemy,
+                    hp: enemy.hp, maxHp: enemy.def.hp,
+                    mp: enemy.mp, maxMp: enemy.def.mp,
+                    atk: enemy.def.atk, def: enemy.def.def, spd: enemy.def.spd,
+                    atb: 0, isPlayerUnit: false, partyIndex: -1,
+                    techs: [],
+                    waitingForInput: false,
+                };
+                this.battleMgr.startBattle([
+                    { sprite: this.player, unit: this.player.battleUnit },
+                    { sprite: this.ally, unit: this.ally.battleUnit },
+                ], [{ sprite: enemy, unit: enemyUnit }]);
             });
         });
     }
-    // ── Debug HUD ──────────────────────────────────────────────────────────────
-    setupDebugHUD() {
-        this.debugText = this.add
-            .text(4, 4, '', {
-            fontSize: '6px',
-            fontFamily: 'monospace',
-            color: '#00ff88',
-            backgroundColor: 'rgba(0,0,0,0.45)',
-            padding: { x: 3, y: 2 },
-        })
-            .setScrollFactor(0)
-            .setDepth(100);
-        // Controls hint (bottom of screen)
-        this.add.text(CANVAS.WIDTH / 2, CANVAS.HEIGHT - 8, '[←→↑↓ / WASD] Move   [Shift] Run   [Z] Action', {
-            fontSize: '5px',
-            fontFamily: 'monospace',
-            color: '#8899aa',
-        }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(100);
+    // ── Decorative NPCs ────────────────────────────────────────────────────────
+    addDecoNPCs() {
+        [[12, 3], [20, 6], [7, 14]].forEach(([tx, ty], i) => {
+            const npc = this.physics.add.sprite(tx * TILE.SIZE + TILE.SIZE / 2, ty * TILE.SIZE + TILE.SIZE, 'npc', i % 2 === 0 ? 0 : 2);
+            npc.setOrigin(0.5, 1).setDepth(8);
+            this.tweens.add({ targets: npc, y: npc.y - 1, duration: 700 + i * 200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        });
     }
-    // ── Update loop ────────────────────────────────────────────────────────────
+    // ── Debug HUD ─────────────────────────────────────────────────────────────
+    setupDebugHUD() {
+        this.debugText = this.add.text(4, 4, '', {
+            fontSize: '6px', fontFamily: 'monospace', color: '#00ff88',
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            padding: { x: 3, y: 2 },
+        }).setScrollFactor(0).setDepth(100);
+        this.add.text(CANVAS.WIDTH / 2, CANVAS.HEIGHT - 5, '[Arrows/WASD] Move  [Shift] Run  [Z] Confirm', { fontSize: '5px', fontFamily: 'monospace', color: '#667788' }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(100);
+    }
+    // ── Update ────────────────────────────────────────────────────────────────
     update(_time, delta) {
-        this.player.update(delta);
+        if (this.locked) {
+            this.battleMgr.update(delta);
+        }
+        else {
+            this.player.update(delta);
+            this.ally.update(delta, false);
+        }
+        this.enemies.forEach(e => e.tick(delta, this.locked));
         this.refreshDebug();
     }
     refreshDebug() {
         const { x, y } = this.player;
         const tx = Math.floor(x / TILE.SIZE);
         const ty = Math.floor(y / TILE.SIZE);
-        this.debugText.setText(`Pos  ${x.toFixed(0).padStart(3)} , ${y.toFixed(0).padStart(3)}\n` +
-            `Tile ${tx} , ${ty}\n` +
-            `State  ${this.player.playerState ?? '—'}   Face  ${this.player.facing}`);
+        const bu = this.player.battleUnit;
+        this.debugText.setText(`Pos ${x.toFixed(0).padStart(3)},${y.toFixed(0).padStart(3)}  Tile ${tx},${ty}\n` +
+            `State ${this.player.playerState ?? '—'}  Face ${this.player.facing}\n` +
+            `HP ${bu.hp}/${bu.maxHp}  MP ${bu.mp}/${bu.maxMp}  ${this.locked ? '⚔ BATTLE' : '🗺 EXPLORE'}`);
     }
 }
