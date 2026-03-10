@@ -15,7 +15,7 @@ export class ATBSystem {
                 continue; // already waiting, don't over-fill
             if (u.atb >= 100)
                 continue;
-            u.atb += u.spd * sec * 10; // scale: spd=10 → 100 in 1 s (adjust)
+            u.atb += u.spd * sec; // scale: spd=15 → 100 in ~6.7 s
             if (u.atb >= 100) {
                 u.atb = 100;
                 justReady.push(u);

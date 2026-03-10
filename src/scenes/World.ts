@@ -45,13 +45,14 @@ const ENEMY_SPAWNS: Array<[number, number, string]> = [
 // ── World ─────────────────────────────────────────────────────────────────────
 export class World extends Phaser.Scene {
 
-  private player!    : Player;
-  private ally!      : Ally;
-  private enemies    : Enemy[] = [];
-  private wallLayer! : Phaser.Tilemaps.TilemapLayer;
-  private battleMgr! : BattleManager;
-  private debugText! : Phaser.GameObjects.Text;
-  private locked     = false;   // true while battle is running
+  private player!        : Player;
+  private ally!          : Ally;
+  private enemies        : Enemy[] = [];
+  private wallLayer!     : Phaser.Tilemaps.TilemapLayer;
+  private battleMgr!     : BattleManager;
+  private debugText!     : Phaser.GameObjects.Text;
+  private locked         = false;   // true while battle is running
+  private battleCooldown = false;   // brief cooldown after battle ends to prevent immediate re-trigger
 
   constructor() { super({ key: SCENE.WORLD }); }
 
@@ -129,11 +130,14 @@ export class World extends Phaser.Scene {
       () => {
         this.locked = false;
         this.cameras.main.startFollow(this.player, true, 0.10, 0.10);
-        // Remove dead enemies from tracking
+        // Remove enemies whose sprites were faded out (alpha=0) by BattleManager
         this.enemies = this.enemies.filter(e => {
-          if (e.isDead) { e.destroy(); return false; }
+          if (!e.active || e.alpha < 0.1) { e.destroy(); return false; }
           return true;
         });
+        // Brief cooldown to prevent instantly re-triggering a battle
+        this.battleCooldown = true;
+        this.time.delayedCall(800, () => { this.battleCooldown = false; });
       },
     );
 
@@ -143,7 +147,7 @@ export class World extends Phaser.Scene {
         this.player as unknown as Phaser.Physics.Arcade.Sprite,
         enemy as unknown as Phaser.Physics.Arcade.Sprite,
         () => {
-          if (this.locked) return;
+          if (this.locked || this.battleCooldown) return;
 
           // Build BattleUnit entries for alive enemies encountered
           // (for now: the single enemy that was touched)

@@ -44,6 +44,7 @@ export class World extends Phaser.Scene {
         super({ key: SCENE.WORLD });
         this.enemies = [];
         this.locked = false; // true while battle is running
+        this.battleCooldown = false; // brief cooldown after battle ends to prevent immediate re-trigger
     }
     create() {
         this.createTilemap();
@@ -108,19 +109,22 @@ export class World extends Phaser.Scene {
         () => {
             this.locked = false;
             this.cameras.main.startFollow(this.player, true, 0.10, 0.10);
-            // Remove dead enemies from tracking
+            // Remove enemies whose sprites were faded out (alpha=0) by BattleManager
             this.enemies = this.enemies.filter(e => {
-                if (e.isDead) {
+                if (!e.active || e.alpha < 0.1) {
                     e.destroy();
                     return false;
                 }
                 return true;
             });
+            // Brief cooldown to prevent instantly re-triggering a battle
+            this.battleCooldown = true;
+            this.time.delayedCall(800, () => { this.battleCooldown = false; });
         });
         // Register overlap triggers for each enemy
         this.enemies.forEach(enemy => {
             this.physics.add.overlap(this.player, enemy, () => {
-                if (this.locked)
+                if (this.locked || this.battleCooldown)
                     return;
                 // Build BattleUnit entries for alive enemies encountered
                 // (for now: the single enemy that was touched)

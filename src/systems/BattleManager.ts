@@ -20,6 +20,7 @@ export class BattleManager {
   private readonly ui       : BattleUI;
 
   private _phase    : BattlePhase = 'idle';
+  private menuOpen  : boolean = false;      // true while command/tech menu is showing
   private playerUnits : BattleUnit[] = [];
   private enemyUnits  : BattleUnit[] = [];
   private commandQueue: BattleUnit[] = [];  // player units waiting for command
@@ -116,6 +117,9 @@ export class BattleManager {
   update(dt: number): void {
     if (this._phase !== 'active') return;
 
+    // Don't tick ATB while menu is open (pure ATB pause during player decision)
+    if (this.menuOpen) { this.updateStatusUI(); return; }
+
     const justReady = this.atb.tick([...this.playerUnits, ...this.enemyUnits], dt);
 
     justReady.forEach(unit => {
@@ -160,9 +164,10 @@ export class BattleManager {
   private tryShowCommand(): void {
     if (this.commandQueue.length === 0) return;
     if (this._phase !== 'active') return;
+    if (this.menuOpen) return;
 
     const unit = this.commandQueue[0];
-    this._phase = 'animating'; // pause ATB during menu (menu phase counts as animating to block re-entry)
+    this.menuOpen = true;
 
     // Find dual techs available: techs where all required units have full ATB
     const dualAvail = unit.techs
@@ -171,6 +176,7 @@ export class BattleManager {
       .map(t => t.key);
 
     this.ui.showCommandMenu(unit, dualAvail, (choice, techKey) => {
+      this.menuOpen = false;
       this.handlePlayerChoice(unit, choice, techKey);
     });
   }
@@ -199,10 +205,18 @@ export class BattleManager {
           .map(t => ({ key: t.key, name: t.name, mpCost: t.mpCost, desc: t.desc }));
 
         this.ui.showTechMenu(availList, (selectedKey) => {
+          this.menuOpen = false;
           if (!selectedKey) {
             // Back to command menu
-            this._phase = 'active';
-            this.tryShowCommand(); // re-show for this unit
+            this.menuOpen = true;
+            const dualAvail2 = unit.techs
+              .map(k => TECHS[k])
+              .filter(t => t && t.participants === 2 && t.requires && this.allPartyReady(t.requires))
+              .map(t => t.key);
+            this.ui.showCommandMenu(unit, dualAvail2, (choice2, techKey2) => {
+              this.menuOpen = false;
+              this.handlePlayerChoice(unit, choice2, techKey2);
+            });
             return;
           }
           const def  = TECHS[selectedKey];
@@ -212,6 +226,7 @@ export class BattleManager {
         break;
       }
       case 'flee': {
+        this.menuOpen = false;
         this.flee();
         break;
       }
@@ -304,9 +319,9 @@ export class BattleManager {
       const expGain = this.enemyUnits.reduce((s, u) => s + ((u as unknown as { exp?: number }).exp ?? 5), 0);
       this.scene.time.delayedCall(300, () => {
         this.ui.showBanner(`Victory!  +${expGain} EXP`, '#ffe080', 2000);
-        // Despawn enemy sprites
+        // Fade out enemy sprites (World.ts will destroy them in onBattleEnd)
         this.engagedEnemyObjs.forEach(s => {
-          this.scene.tweens.add({ targets: s, alpha: 0, duration: 500, onComplete: () => s.destroy() });
+          this.scene.tweens.add({ targets: s, alpha: 0, duration: 500 });
         });
         this.scene.time.delayedCall(2200, () => this.endBattle());
       });
@@ -339,7 +354,8 @@ export class BattleManager {
 
   // ── End battle ────────────────────────────────────────────────────────────────
   private endBattle(): void {
-    this._phase = 'idle';
+    this._phase   = 'idle';
+    this.menuOpen = false;
     this.ui.destroy();
     this.commandQueue  = [];
     this.playerUnits   = [];
