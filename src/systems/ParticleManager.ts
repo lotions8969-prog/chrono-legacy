@@ -1,8 +1,20 @@
 import Phaser from 'phaser';
 
-// ── ParticleManager ───────────────────────────────────────────────────────────
-// Spawns 16-bit style magic / hit effects using programmatic Graphics tweens.
-// All effects are self-cleaning (destroy on completion).
+// ── ParticleManager ────────────────────────────────────────────────────────────
+// Procedurally rendered visual effects for battles.
+// No external sprite assets – all effects drawn with Graphics + Tweens.
+
+type EffectKey =
+  | 'slash'
+  | 'fire'
+  | 'ice'
+  | 'lightning'
+  | 'heal'
+  | 'firesword'
+  | 'icetackle'
+  | 'crystal'
+  | 'default';
+
 export class ParticleManager {
   private readonly scene: Phaser.Scene;
 
@@ -10,261 +22,316 @@ export class ParticleManager {
     this.scene = scene;
   }
 
-  play(effectKey: string, wx: number, wy: number, onDone?: () => void): void {
-    switch (effectKey) {
-      case 'slash'    : this.fxSlash(wx, wy, onDone); break;
-      case 'fire'     : this.fxFire(wx, wy, onDone);  break;
-      case 'ice'      : this.fxIce(wx, wy, onDone);   break;
-      case 'lightning': this.fxLightning(wx, wy, onDone); break;
-      case 'heal'     : this.fxHeal(wx, wy, onDone);  break;
-      case 'firesword': this.fxFireSword(wx, wy, onDone); break;
-      case 'icetackle': this.fxIceTackle(wx, wy, onDone); break;
-      default         : onDone?.(); break;
+  // ── Play a named effect ───────────────────────────────────────────────────
+
+  play(key: EffectKey, x: number, y: number, onDone?: () => void): void {
+    switch (key) {
+      case 'slash':      this.fxSlash(x, y, onDone);     break;
+      case 'fire':       this.fxFire(x, y, onDone);      break;
+      case 'ice':        this.fxIce(x, y, onDone);       break;
+      case 'lightning':  this.fxLightning(x, y, onDone); break;
+      case 'heal':       this.fxHeal(x, y, onDone);      break;
+      case 'firesword':  this.fxFireSword(x, y, onDone); break;
+      case 'icetackle':  this.fxIceTackle(x, y, onDone); break;
+      case 'crystal':    this.fxCrystal(x, y, onDone);   break;
+      default:           this.fxDefault(x, y, onDone);   break;
     }
   }
 
-  // ── Slash ──────────────────────────────────────────────────────────────────
+  // ── Slash ─────────────────────────────────────────────────────────────────
   private fxSlash(x: number, y: number, cb?: () => void): void {
-    const lines: Phaser.GameObjects.Graphics[] = [];
-    const angles = [-45, 0, 45];
+    const DURATION = 220;
+    const arcs = [
+      { ax: x - 6, ay: y - 8, ex: x + 8,  ey: y + 4,  col: 0xFFFFEE },
+      { ax: x - 4, ay: y - 6, ex: x + 6,  ey: y + 6,  col: 0xCCDDFF },
+      { ax: x - 8, ay: y - 4, ex: x + 10, ey: y + 2,  col: 0xEEEEFF },
+    ];
 
-    angles.forEach((deg, i) => {
-      const g = this.scene.add.graphics().setDepth(50);
-      g.lineStyle(2, 0xffffff, 1);
-      const rad = Phaser.Math.DegToRad(deg);
-      const len = 12;
-      g.lineBetween(
-        x - Math.cos(rad) * len, y - Math.sin(rad) * len,
-        x + Math.cos(rad) * len, y + Math.sin(rad) * len,
-      );
-      lines.push(g);
+    let done = 0;
+    arcs.forEach(({ ax, ay, ex, ey, col }, i) => {
+      const g = this.scene.add.graphics().setDepth(300);
+      g.lineStyle(i === 0 ? 2 : 1, col, 1);
+      g.beginPath();
+      g.moveTo(ax, ay);
+      g.lineTo(ex, ey);
+      g.strokePath();
 
       this.scene.tweens.add({
-        targets : g,
-        alpha   : 0,
-        x       : g.x + Math.cos(rad + Math.PI / 2) * 6,
-        y       : g.y + Math.sin(rad + Math.PI / 2) * 6,
-        duration: 200,
-        delay   : i * 40,
-        onComplete: () => { g.destroy(); if (i === angles.length - 1) cb?.(); },
+        targets: g, alpha: 0,
+        duration: DURATION, delay: i * 30,
+        onComplete: () => {
+          g.destroy();
+          done++;
+          if (done === arcs.length) cb?.();
+        },
       });
     });
-    lines; // suppress unused
+
+    // Screen shake
+    this.screenShake(2, 80);
   }
 
-  // ── Fire ───────────────────────────────────────────────────────────────────
+  // ── Fire ──────────────────────────────────────────────────────────────────
   private fxFire(x: number, y: number, cb?: () => void): void {
-    const colors = [0xff8800, 0xff4400, 0xffcc00, 0xff2200];
+    const count  = 20;
+    const colors = [0xFF6600, 0xFF9900, 0xFFCC00, 0xFF3300, 0xFFFF44];
     let done = 0;
-    const total = 8;
 
-    for (let i = 0; i < total; i++) {
-      const g     = this.scene.add.graphics().setDepth(50);
-      const col   = Phaser.Utils.Array.GetRandom(colors) as number;
-      const angle = (i / total) * Math.PI * 2;
-      const dist  = Phaser.Math.Between(4, 14);
-      const size  = Phaser.Math.Between(2, 5);
+    this.screenFlash(0xFF6600, 0.18);
+    this.screenShake(3, 150);
 
+    for (let i = 0; i < count; i++) {
+      const angle  = (i / count) * Math.PI * 2;
+      const speed  = 24 + Math.random() * 28;
+      const tx     = x + Math.cos(angle) * speed;
+      const ty     = y + Math.sin(angle) * speed - 18;
+      const col    = colors[Math.floor(Math.random() * colors.length)];
+      const sz     = 2 + Math.random() * 3;
+
+      const g = this.scene.add.graphics().setDepth(300);
       g.fillStyle(col, 1);
-      g.fillRect(-size / 2, -size / 2, size, size);
-      g.setPosition(x, y);
+      g.fillCircle(x, y, sz);
 
       this.scene.tweens.add({
-        targets  : g,
-        x        : x + Math.cos(angle) * dist,
-        y        : y + Math.sin(angle) * dist - 8,
-        alpha    : 0,
-        scaleX   : 0.2,
-        scaleY   : 0.2,
-        duration : 350 + i * 30,
-        ease     : 'Quad.easeOut',
-        onComplete: () => {
-          g.destroy();
-          done++;
-          if (done === total) cb?.();
-        },
+        targets: g, x: tx - x, y: ty - y,
+        alpha: 0, scaleX: 0.2, scaleY: 0.2,
+        duration: 380 + Math.random() * 150,
+        ease: 'Quad.easeOut',
+        onComplete: () => { g.destroy(); done++; if (done === count) cb?.(); },
       });
     }
 
-    // additive-style flash
-    const flash = this.scene.add.graphics().setDepth(49);
-    flash.fillStyle(0xff6600, 0.4);
-    flash.fillCircle(x, y, 16);
-    this.scene.tweens.add({ targets: flash, alpha: 0, duration: 200, onComplete: () => flash.destroy() });
+    // Central burst
+    const center = this.scene.add.graphics().setDepth(301);
+    center.fillStyle(0xFFFF88, 0.9);
+    center.fillCircle(x, y, 10);
+    this.scene.tweens.add({ targets: center, alpha: 0, scaleX: 2.8, scaleY: 2.8,
+      duration: 320, ease: 'Quad.easeOut', onComplete: () => center.destroy() });
   }
 
-  // ── Ice ────────────────────────────────────────────────────────────────────
+  // ── Ice ───────────────────────────────────────────────────────────────────
   private fxIce(x: number, y: number, cb?: () => void): void {
-    const shards = 6;
+    const count = 16;
+    const colors = [0x88CCFF, 0xAADDFF, 0xCCEEFF, 0x4499DD, 0xFFFFFF];
     let done = 0;
 
-    for (let i = 0; i < shards; i++) {
-      const g     = this.scene.add.graphics().setDepth(50);
-      const angle = (i / shards) * Math.PI * 2;
-      g.fillStyle(0x88ddff, 1);
-      // Draw a thin diamond shard
-      g.fillTriangle(0, -6, -3, 0, 3, 0);
-      g.fillStyle(0xccf4ff, 0.6);
-      g.fillTriangle(0, -6, -1, -3, 1, -3);
-      g.setPosition(x, y);
-      g.setRotation(angle);
+    this.screenFlash(0x88CCFF, 0.15);
+    this.screenShake(2, 120);
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const r     = 20 + Math.random() * 12;
+      const tx    = x + Math.cos(angle) * r;
+      const ty    = y + Math.sin(angle) * r;
+      const col   = colors[Math.floor(Math.random() * colors.length)];
+      const s     = 2 + Math.random() * 2.5;
+
+      const g = this.scene.add.graphics().setDepth(300);
+      g.fillStyle(col, 1);
+      // Ice shard (diamond shape)
+      g.fillTriangle(x, y - s, x - s, y, x + s, y);
+      g.fillTriangle(x, y + s, x - s, y, x + s, y);
 
       this.scene.tweens.add({
-        targets  : g,
-        x        : x + Math.cos(angle) * 18,
-        y        : y + Math.sin(angle) * 18,
-        rotation : g.rotation + Math.PI,
-        alpha    : 0,
-        duration : 400,
-        delay    : i * 30,
-        ease     : 'Cubic.easeOut',
-        onComplete: () => {
-          g.destroy();
-          done++;
-          if (done === shards) cb?.();
-        },
+        targets: g, x: tx - x, y: ty - y, alpha: 0,
+        scaleX: 0, scaleY: 0,
+        duration: 420,
+        ease: 'Cubic.easeOut',
+        onComplete: () => { g.destroy(); done++; if (done === count) cb?.(); },
       });
     }
 
-    // Blue flash
-    const flash = this.scene.add.graphics().setDepth(49);
-    flash.fillStyle(0x4499ff, 0.35);
-    flash.fillCircle(x, y, 18);
-    this.scene.tweens.add({ targets: flash, alpha: 0, duration: 250, onComplete: () => flash.destroy() });
+    // Freeze burst ring
+    const ring = this.scene.add.graphics().setDepth(301);
+    ring.lineStyle(2, 0xAADDFF, 0.8);
+    ring.strokeCircle(x, y, 4);
+    this.scene.tweens.add({ targets: ring, scaleX: 3, scaleY: 3, alpha: 0,
+      duration: 350, onComplete: () => ring.destroy() });
   }
 
-  // ── Lightning ──────────────────────────────────────────────────────────────
+  // ── Lightning ─────────────────────────────────────────────────────────────
   private fxLightning(x: number, y: number, cb?: () => void): void {
-    const g = this.scene.add.graphics().setDepth(50);
+    this.screenFlash(0xFFFF44, 0.4);
+    this.screenShake(5, 200);
+    const BOLTS = 3;
+    let done = 0;
 
-    const drawBolt = (alpha: number) => {
-      g.clear();
-      g.lineStyle(2, 0xffff44, alpha);
-      let cy = y - 30;
-      g.moveTo(x + Phaser.Math.Between(-4, 4), cy);
-      while (cy < y + 10) {
-        cy += Phaser.Math.Between(4, 8);
-        const nx = x + Phaser.Math.Between(-8, 8);
-        g.lineTo(nx, cy);
+    for (let b = 0; b < BOLTS; b++) {
+      const g = this.scene.add.graphics().setDepth(300);
+      const ox = x + Phaser.Math.Between(-6, 6);
+      const oy = y - 35 + b * 2;
+
+      g.lineStyle(b === 0 ? 2 : 1, b === 0 ? 0xFFFFAA : 0xCCFFFF, 1);
+      g.beginPath();
+
+      let cy = oy;
+      let cx = ox;
+      g.moveTo(cx, cy);
+      while (cy < y + 4) {
+        const ny = cy + Phaser.Math.Between(4, 8);
+        const nx = cx + Phaser.Math.Between(-5, 5);
+        g.lineTo(nx, ny);
+        cx = nx; cy = ny;
       }
       g.strokePath();
 
-      // Branches
-      g.lineStyle(1, 0xffffaa, alpha * 0.7);
-      for (let b = 0; b < 3; b++) {
-        const bx = x + Phaser.Math.Between(-6, 6);
-        const by = y - Phaser.Math.Between(5, 25);
-        g.moveTo(bx, by);
-        g.lineTo(bx + Phaser.Math.Between(-10, 10), by + Phaser.Math.Between(5, 12));
-        g.strokePath();
-      }
-    };
-
-    let flashes = 0;
-    const doFlash = () => {
-      drawBolt(1 - flashes * 0.25);
-      flashes++;
-      if (flashes < 4) {
-        this.scene.time.delayedCall(80, doFlash);
-      } else {
-        this.scene.tweens.add({ targets: g, alpha: 0, duration: 100, onComplete: () => { g.destroy(); cb?.(); } });
-      }
-    };
-    doFlash();
-
-    // Yellow glow
-    const flash = this.scene.add.graphics().setDepth(49);
-    flash.fillStyle(0xffff00, 0.3);
-    flash.fillCircle(x, y, 14);
-    this.scene.tweens.add({ targets: flash, alpha: 0, duration: 320, onComplete: () => flash.destroy() });
-  }
-
-  // ── Heal ───────────────────────────────────────────────────────────────────
-  private fxHeal(x: number, y: number, cb?: () => void): void {
-    let done = 0;
-    const total = 5;
-    for (let i = 0; i < total; i++) {
-      const g = this.scene.add.graphics().setDepth(50);
-      g.fillStyle(0x44ff88, 1);
-      // Small cross / plus
-      g.fillRect(-1, -3, 2, 6);
-      g.fillRect(-3, -1, 6, 2);
-      g.setPosition(x + Phaser.Math.Between(-8, 8), y + Phaser.Math.Between(-4, 4));
-
       this.scene.tweens.add({
-        targets  : g,
-        y        : g.y - 18,
-        alpha    : 0,
-        duration : 500,
-        delay    : i * 60,
-        ease     : 'Quad.easeOut',
-        onComplete: () => {
-          g.destroy();
-          done++;
-          if (done === total) cb?.();
-        },
+        targets: g, alpha: 0,
+        duration: 200, delay: b * 60,
+        onComplete: () => { g.destroy(); done++; if (done === BOLTS) cb?.(); },
       });
     }
 
-    const flash = this.scene.add.graphics().setDepth(49);
-    flash.fillStyle(0x00ff66, 0.3);
-    flash.fillCircle(x, y, 14);
-    this.scene.tweens.add({ targets: flash, alpha: 0, duration: 300, onComplete: () => flash.destroy() });
+    // Impact at target
+    const flash = this.scene.add.graphics().setDepth(302);
+    flash.fillStyle(0xFFFFBB, 0.9);
+    flash.fillCircle(x, y, 7);
+    this.scene.tweens.add({ targets: flash, alpha: 0, scaleX: 3.5, scaleY: 3.5,
+      duration: 280, onComplete: () => flash.destroy() });
+
+    // Star burst
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const len = 12;
+      const eg = this.scene.add.graphics().setDepth(301);
+      eg.lineStyle(1, 0xFFFF88, 1);
+      eg.lineBetween(x, y, x + Math.cos(a) * len, y + Math.sin(a) * len);
+      this.scene.tweens.add({ targets: eg, alpha: 0, duration: 300,
+        onComplete: () => eg.destroy() });
+    }
   }
 
-  // ── Dual: Fire Sword ───────────────────────────────────────────────────────
+  // ── Heal ──────────────────────────────────────────────────────────────────
+  private fxHeal(x: number, y: number, cb?: () => void): void {
+    const count = 14;
+    const colors = [0x44FF88, 0x88FFCC, 0xCCFFAA, 0xFFFFBB, 0xBBFFBB];
+    let done = 0;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+      const r     = 16 + Math.random() * 10;
+      const tx    = x + Math.cos(angle) * r;
+      const ty    = y + Math.sin(angle) * r;
+      const col   = colors[Math.floor(Math.random() * colors.length)];
+      const sz    = 1 + Math.random() * 2;
+
+      const g = this.scene.add.graphics().setDepth(300);
+      g.fillStyle(col, 1);
+      g.fillCircle(x, y, sz);
+
+      this.scene.tweens.add({
+        targets: g, x: tx - x, y: ty - y - 12,
+        alpha: 0, scaleX: 0.5, scaleY: 0.5,
+        duration: 550,
+        ease: 'Quad.easeOut',
+        onComplete: () => { g.destroy(); done++; if (done === count) cb?.(); },
+      });
+    }
+
+    // Healing cross
+    const plus = this.scene.add.text(x, y - 8, '+', {
+      fontSize: '16px', fontFamily: 'monospace', color: '#88FF88',
+      stroke: '#002200', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(301);
+    this.scene.tweens.add({ targets: plus, y: y - 26, alpha: 0, duration: 700,
+      ease: 'Quad.easeOut', onComplete: () => plus.destroy() });
+  }
+
+  // ── Fire Sword (dual tech) ────────────────────────────────────────────────
   private fxFireSword(x: number, y: number, cb?: () => void): void {
-    // Large slash + fire burst combo
+    this.screenFlash(0xFF4400, 0.45);
+    this.screenShake(4, 180);
     this.fxSlash(x, y);
-    this.scene.time.delayedCall(100, () => this.fxFire(x, y));
-    this.scene.time.delayedCall(200, () => this.fxFire(x - 10, y + 5));
-    this.scene.time.delayedCall(300, () => { this.fxFire(x + 10, y - 5); cb?.(); });
+    setTimeout(() => this.fxFire(x, y, cb), 100);
   }
 
-  // ── Dual: Ice Tackle ──────────────────────────────────────────────────────
+  // ── Ice Tackle (dual tech) ────────────────────────────────────────────────
   private fxIceTackle(x: number, y: number, cb?: () => void): void {
-    this.fxIce(x, y);
-    this.scene.time.delayedCall(120, () => this.fxIce(x + 12, y));
-    this.scene.time.delayedCall(240, () => { this.fxIce(x - 12, y); cb?.(); });
+    this.screenFlash(0x44AAFF, 0.45);
+    this.screenShake(4, 180);
+    this.fxSlash(x, y);
+    setTimeout(() => this.fxIce(x, y, cb), 100);
   }
 
-  // ── Floating damage number ─────────────────────────────────────────────────
+  // ── Crystal (wraith attack) ────────────────────────────────────────────────
+  private fxCrystal(x: number, y: number, cb?: () => void): void {
+    this.screenFlash(0x8844FF, 0.35);
+    this.screenShake(3, 160);
+    const count = 12;
+    let done = 0;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const r     = 20 + Math.random() * 10;
+      const g = this.scene.add.graphics().setDepth(300);
+      g.fillStyle(0xAABBFF, 1);
+      g.fillCircle(x, y, 2 + Math.random());
+      this.scene.tweens.add({
+        targets: g,
+        x: Math.cos(angle) * r,
+        y: Math.sin(angle) * r,
+        alpha: 0,
+        duration: 480,
+        ease: 'Cubic.easeOut',
+        onComplete: () => { g.destroy(); done++; if (done === count) cb?.(); },
+      });
+    }
+  }
+
+  // ── Default ───────────────────────────────────────────────────────────────
+  private fxDefault(x: number, y: number, cb?: () => void): void {
+    const g = this.scene.add.graphics().setDepth(300);
+    g.fillStyle(0xFFFFFF, 0.9);
+    g.fillCircle(x, y, 5);
+    this.scene.tweens.add({ targets: g, alpha: 0, scaleX: 2.5, scaleY: 2.5,
+      duration: 260, onComplete: () => { g.destroy(); cb?.(); } });
+  }
+
+  // ── Damage numbers ────────────────────────────────────────────────────────
   showDamageNumber(
-    x: number, y: number,
-    value: number,
-    element: string = 'physical',
-    heal: boolean   = false,
+    x      : number,
+    y      : number,
+    value  : number,
+    element: string,
+    isHeal  = false,
   ): void {
-    const colorMap: Record<string, string> = {
-      physical: '#ffffff', fire: '#ff8800', ice: '#88ddff',
-      lightning: '#ffff44', heal: '#44ff88',
+    const colors: Record<string, string> = {
+      physical  : '#FFFFFF',
+      fire      : '#FF8800',
+      ice       : '#88DDFF',
+      lightning : '#FFFF44',
+      heal      : '#88FF88',
+      default   : '#DDDDDD',
     };
-    const col = heal ? '#44ff88' : (colorMap[element] ?? '#ffffff');
+    const col  = isHeal ? '#88FF88' : (colors[element] ?? colors.default);
+    const sign = isHeal ? '+' : '';
+    const size = value >= 100 ? '10px' : '8px';
 
-    const txt = this.scene.add.text(x, y - 8, heal ? `+${value}` : String(value), {
-      fontSize  : '8px',
-      fontFamily: 'monospace',
-      color     : col,
-      stroke    : '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0.5, 1).setDepth(60);
+    const txt = this.scene.add.text(x, y, `${sign}${value}`, {
+      fontSize         : size,
+      fontFamily       : 'monospace',
+      color            : col,
+      stroke           : '#000000',
+      strokeThickness  : 2,
+    }).setOrigin(0.5).setDepth(350);
 
-    // Bounce physics: pop up then fall with gravity simulation
-    let vy  = -60;
-    const gravity = 120;
-    let elapsed = 0;
-    const dur    = 900;
+    this.scene.tweens.add({
+      targets : txt,
+      y       : y - 22,
+      alpha   : 0,
+      duration: 950,
+      ease    : 'Quad.easeOut',
+      onComplete: () => txt.destroy(),
+    });
+  }
 
-    const listener = (_time: number, delta: number) => {
-      elapsed += delta;
-      vy += gravity * (delta / 1000);
-      txt.y += vy * (delta / 1000);
-      if (elapsed > dur / 2) txt.setAlpha(1 - (elapsed - dur / 2) / (dur / 2));
-      if (elapsed >= dur) {
-        txt.destroy();
-        this.scene.events.off('update', listener);
-      }
-    };
-    this.scene.events.on('update', listener);
+  // ── Screen flash ──────────────────────────────────────────────────────────
+  private screenFlash(color: number, _alpha: number): void {
+    const cam = this.scene.cameras.main;
+    cam.flash(130, (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF, false);
+  }
+
+  // ── Camera shake ──────────────────────────────────────────────────────────
+  screenShake(intensity = 3, duration = 150): void {
+    this.scene.cameras.main.shake(duration, intensity / 100);
   }
 }

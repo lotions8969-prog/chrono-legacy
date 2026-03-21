@@ -235,7 +235,8 @@ export class BattleManager {
         const vfxX = targets[0]?.sprite.x ?? this.scene.cameras.main.scrollX + W / 2;
         const vfxY = targets[0]?.sprite.y ?? this.scene.cameras.main.scrollY + H / 2;
         const isHeal = def.element === 'heal';
-        this.vfx.play(def.effectKey, vfxX, vfxY, () => {
+        const safeKey = def.effectKey ?? 'default';
+        this.vfx.play(safeKey, vfxX, vfxY, () => {
             // Apply damage/heal to each target
             targets.forEach(t => {
                 if (isHeal) {

@@ -5,6 +5,9 @@ import { ParticleManager } from './ParticleManager';
 import { TECHS } from '../data/techs';
 import { CANVAS } from '../data/constants';
 
+// Narrow type matching ParticleManager's EffectKey
+type EffectKey = 'slash' | 'fire' | 'ice' | 'lightning' | 'heal' | 'firesword' | 'icetackle' | 'crystal' | 'default';
+
 const W = CANVAS.WIDTH;
 const H = CANVAS.HEIGHT;
 
@@ -266,7 +269,8 @@ export class BattleManager {
 
     const isHeal = def.element === 'heal';
 
-    this.vfx.play(def.effectKey, vfxX, vfxY, () => {
+    const safeKey = (def.effectKey as EffectKey) ?? 'default';
+    this.vfx.play(safeKey, vfxX, vfxY, () => {
       // Apply damage/heal to each target
       targets.forEach(t => {
         if (isHeal) {
