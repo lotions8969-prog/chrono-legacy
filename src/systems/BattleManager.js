@@ -160,7 +160,7 @@ export class BattleManager {
         switch (choice) {
             case 'attack': {
                 const techDef = TECHS['SLASH']; // basic attack = SLASH no-cost version
-                const targets = this.pickEnemyTargets(techDef?.target ?? 'single_enemy');
+                const targets = this.pickTargets(techDef?.target ?? 'single_enemy');
                 this.executePlayerAction(unit, targets, 'SLASH');
                 break;
             }
@@ -192,7 +192,7 @@ export class BattleManager {
                         return;
                     }
                     const def = TECHS[selectedKey];
-                    const tgts = this.pickEnemyTargets(def.target);
+                    const tgts = this.pickTargets(def.target);
                     this.executePlayerAction(unit, tgts, selectedKey);
                 });
                 break;
@@ -260,7 +260,11 @@ export class BattleManager {
         });
     }
     // ── Target selection ─────────────────────────────────────────────────────────
-    pickEnemyTargets(targetType) {
+    pickTargets(targetType) {
+        if (targetType === 'single_ally') {
+            const alive = this.playerUnits.filter(u => u.hp > 0);
+            return alive.length > 0 ? [alive.reduce((a, b) => a.hp < b.hp ? a : b)] : [];
+        }
         const alive = this.enemyUnits.filter(u => u.hp > 0);
         if (targetType === 'all_enemies')
             return alive;

@@ -279,7 +279,6 @@ export class World extends Phaser.Scene {
             if (!def)
                 return;
             const enemy = new Enemy(this, tx * TILE.SIZE + TILE.SIZE / 2, ty * TILE.SIZE + TILE.SIZE, def);
-            this.wallLayer.setCollision(BLOCKING_TILES);
             this.physics.add.collider(enemy, this.wallLayer);
             this.enemies.push(enemy);
         });
@@ -344,6 +343,7 @@ export class World extends Phaser.Scene {
                     mp: enemy.mp, maxMp: enemy.def.mp,
                     atk: enemy.def.atk, def: enemy.def.def, spd: enemy.def.spd,
                     atb: 0, isPlayerUnit: false, partyIndex: -1,
+                    exp: enemy.def.exp,
                     techs: [],
                     waitingForInput: false,
                 };
