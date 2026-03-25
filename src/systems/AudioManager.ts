@@ -12,7 +12,7 @@
  *   audio.sfx('attack');
  */
 
-type TrackName = 'title' | 'field' | 'battle' | 'victory';
+type TrackName = 'title' | 'field' | 'town' | 'battle' | 'victory';
 type OscType   = 'square' | 'sawtooth' | 'triangle' | 'sine';
 
 // ── Note pitch table (Hz) ─────────────────────────────────────────────────────
@@ -113,6 +113,47 @@ const FIELD_BASS: NoteCell[] = [
   ['D3',4],['G2',4],                    ['G2',8],
   ['G2',4],['C3',4],                    ['D3',4],['G2',4],
   ['D3',4],['G2',4],                    ['G2',8],
+];
+
+// Town theme: key C major, 90 BPM, warm & peaceful
+const TOWN_BPM = 90;
+
+const TOWN_MELODY: NoteCell[] = [
+  // Bar 1-4: gentle opening
+  ['E5',4],['D5',2],['C5',2],  ['E5',4],['G5',4],
+  ['A5',4],['G5',2],['E5',2],  ['D5',8],
+  // Bar 5-8
+  ['C5',4],['E5',4],           ['G5',4],['A5',4],
+  ['G5',4],['E5',2],['D5',2],  ['C5',8],
+  // Bar 9-12
+  ['G4',2],['A4',2],['B4',2],['C5',2],  ['D5',4],['E5',4],
+  ['F5',4],['E5',2],['D5',2],           ['C5',8],
+  // Bar 13-16
+  ['E5',4],['F5',2],['E5',2],  ['D5',4],['C5',4],
+  ['A4',4],['B4',4],            ['C5',8],
+];
+
+const TOWN_BASS: NoteCell[] = [
+  // Bar 1-4
+  ['C3',4],['-',4],  ['C3',4],['-',4],
+  ['A2',4],['-',4],  ['G2',4],['-',4],
+  // Bar 5-8
+  ['C3',4],['-',4],  ['F2',4],['-',4],
+  ['G2',4],['-',4],  ['C3',4],['-',4],
+  // Bar 9-12
+  ['C3',4],['-',4],  ['G2',4],['-',4],
+  ['F2',4],['-',4],  ['C3',4],['-',4],
+  // Bar 13-16
+  ['A2',4],['-',4],  ['F2',4],['-',4],
+  ['G2',4],['-',4],  ['C3',4],['-',4],
+];
+
+const TOWN_CHIME: NoteCell[] = [
+  // Light triangle chime for warmth
+  ['G5',8], ['E5',8],
+  ['A5',8], ['F5',8],
+  ['G5',8], ['C6',8],
+  ['E5',8], ['D5',8],
 ];
 
 // Battle theme: key Dm, 152 BPM, intense
@@ -254,6 +295,7 @@ export class AudioManager {
     switch (track) {
       case 'title':   this.startTitle();   break;
       case 'field':   this.startField();   break;
+      case 'town':    this.startTown();    break;
       case 'battle':  this.startBattle();  break;
       case 'victory': this.startVictory(); break;
     }
@@ -299,6 +341,13 @@ export class AudioManager {
   private startField(): void {
     this.addChannel(FIELD_MELODY, FIELD_BPM, 'square',   0.28,  0,   4000);
     this.addChannel(FIELD_BASS,   FIELD_BPM, 'triangle', 0.32, -3,   5000);
+    this.startScheduler();
+  }
+
+  private startTown(): void {
+    this.addChannel(TOWN_MELODY, TOWN_BPM, 'triangle', 0.26,  0,   5000);
+    this.addChannel(TOWN_BASS,   TOWN_BPM, 'triangle', 0.28, -4,   4000);
+    this.addChannel(TOWN_CHIME,  TOWN_BPM, 'sine',     0.12,  5,   8000);
     this.startScheduler();
   }
 

@@ -33,6 +33,7 @@ export const TILES = {
     DARK_GRASS: 6,
     BRIDGE: 7,
     WOOD_FLOOR: 8,
+    COBBLESTONE: 9,
 };
 /** Tile indices that block the player */
 export const BLOCKING_TILES = [TILES.WATER, TILES.ROCK];

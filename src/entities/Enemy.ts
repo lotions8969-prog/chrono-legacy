@@ -40,8 +40,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
         frames  : [
           { key: 'enemy', frame: this.def.frameBase     },
           { key: 'enemy', frame: this.def.frameBase + 1 },
+          { key: 'enemy', frame: this.def.frameBase + 2 },
         ],
-        frameRate: 4,
+        frameRate: 5,
         repeat  : -1,
       });
     }

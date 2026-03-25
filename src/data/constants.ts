@@ -36,7 +36,8 @@ export const TILES = {
   SAND      : 5,
   DARK_GRASS: 6,
   BRIDGE    : 7,
-  WOOD_FLOOR: 8,
+  WOOD_FLOOR  : 8,
+  COBBLESTONE : 9,
 } as const;
 
 /** Tile indices that block the player */

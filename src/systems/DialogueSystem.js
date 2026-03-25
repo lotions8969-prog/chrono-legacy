@@ -6,17 +6,31 @@ const H = CANVAS.HEIGHT;
 // Full-screen dialogue overlay with character portrait, name plate, and
 // typewriter-effect text. Driven by keyboard (Z to advance / close).
 //
-// Design matches classic Chrono Trigger dialogue boxes:
-//   ┌──────────────────────────────────────────────────────────┐
-//   │ [Portrait] NAME                                         │
-//   │            Text text text text text text …             │
-//   │                                              ▼ press Z  │
-//   └──────────────────────────────────────────────────────────┘
+// Chrono Trigger-style layout:
+//   ╔════════════════════════════════════════════════════════╗
+//   ║  ┌──────────┐  ╔══════════════╗                       ║
+//   ║  │ Portrait │  ║  NAME PLATE  ║                       ║
+//   ║  └──────────┘  ╚══════════════╝                       ║
+//   ║                Text text text text...                  ║
+//   ║                                                  ▼    ║
+//   ╚════════════════════════════════════════════════════════╝
+const BOX_MARGIN = 4;
+const BOX_W = W - BOX_MARGIN * 2;
+const BOX_H = 82;
+const BOX_Y = H - BOX_H - BOX_MARGIN;
+const PORT_SIZE = 46; // portrait display area
+const TEXT_X = PORT_SIZE + 12;
+const TEXT_W = BOX_W - TEXT_X - 6;
+// Typewriter delay (ms per char); punctuation adds extra pause
+const BASE_DELAY = 24;
 export class DialogueSystem {
     constructor(scene) {
         this.container = null;
         this.msgText = null;
+        this.nameText = null;
         this.indicator = null;
+        this.pageCounter = null;
+        this.portraitImg = null;
         this.pages = [];
         this.pageIdx = 0;
         this.charIdx = 0;
@@ -47,7 +61,6 @@ export class DialogueSystem {
             return;
         if (!this.zKey)
             return;
-        // Use Phaser's JustDown to avoid repeated triggers
         if (Phaser.Input.Keyboard.JustDown(this.zKey)) {
             if (!this.typingDone) {
                 this.finishTyping();
@@ -66,48 +79,75 @@ export class DialogueSystem {
     // ── Container ───────────────────────────────────────────────────────────────
     buildContainer() {
         this.container?.destroy();
-        const boxX = 4;
-        const boxY = H - 72;
-        const boxW = W - 8;
-        const boxH = 68;
-        const cont = this.scene.add.container(boxX, boxY).setDepth(200).setScrollFactor(0);
-        // Dark background + golden border
+        const cont = this.scene.add
+            .container(BOX_MARGIN, BOX_Y + BOX_H) // start below screen, slide up
+            .setDepth(200)
+            .setScrollFactor(0);
+        // ── Outer window chrome ─────────────────────────────────────────────────
         const bg = this.scene.add.graphics();
-        bg.fillStyle(0x08061A, 0.92);
-        bg.fillRect(0, 0, boxW, boxH);
-        bg.lineStyle(1, 0xCCA820, 1);
-        bg.strokeRect(0, 0, boxW, boxH);
-        bg.lineStyle(1, 0x664400, 0.5);
-        bg.strokeRect(1, 1, boxW - 2, boxH - 2);
+        // Main background: deep midnight blue
+        bg.fillStyle(0x060418, 0.95);
+        bg.fillRoundedRect(0, 0, BOX_W, BOX_H, 4);
+        // Outer gold border
+        bg.lineStyle(2, 0xCCA820, 1);
+        bg.strokeRoundedRect(0, 0, BOX_W, BOX_H, 4);
+        // Inner subtle border
+        bg.lineStyle(1, 0x664400, 0.6);
+        bg.strokeRoundedRect(2, 2, BOX_W - 4, BOX_H - 4, 3);
+        // Corner accent marks (CT-style diamond corners)
+        const cSize = 4;
+        const cornerColor = 0xFFD060;
+        bg.fillStyle(cornerColor, 0.9);
+        // TL
+        bg.fillTriangle(1, 1, 1 + cSize, 1, 1, 1 + cSize);
+        // TR
+        bg.fillTriangle(BOX_W - 1, 1, BOX_W - 1 - cSize, 1, BOX_W - 1, 1 + cSize);
+        // BL
+        bg.fillTriangle(1, BOX_H - 1, 1 + cSize, BOX_H - 1, 1, BOX_H - 1 - cSize);
+        // BR
+        bg.fillTriangle(BOX_W - 1, BOX_H - 1, BOX_W - 1 - cSize, BOX_H - 1, BOX_W - 1, BOX_H - 1 - cSize);
         cont.add(bg);
-        // Portrait placeholder + portrait sprite
+        // ── Portrait area ────────────────────────────────────────────────────────
         const portBg = this.scene.add.graphics();
-        portBg.fillStyle(0x1A1040, 1);
-        portBg.fillRect(4, 4, 38, 38);
-        portBg.lineStyle(1, 0xCCA820, 0.8);
-        portBg.strokeRect(4, 4, 38, 38);
+        portBg.fillStyle(0x120830, 1);
+        portBg.fillRoundedRect(5, 5, PORT_SIZE, PORT_SIZE, 2);
+        portBg.lineStyle(1, 0xCCA820, 0.9);
+        portBg.strokeRoundedRect(5, 5, PORT_SIZE, PORT_SIZE, 2);
+        // Inner glow
+        portBg.lineStyle(1, 0xFFE080, 0.3);
+        portBg.strokeRoundedRect(7, 7, PORT_SIZE - 4, PORT_SIZE - 4, 1);
         cont.add(portBg);
-        // The actual portrait image (created in showPage)
-        cont.setName('dialogue-box');
-        // Name plate
+        // ── Vertical separator line ──────────────────────────────────────────────
+        const sep = this.scene.add.graphics();
+        sep.lineStyle(1, 0x443366, 0.8);
+        sep.lineBetween(PORT_SIZE + 8, 4, PORT_SIZE + 8, BOX_H - 4);
+        cont.add(sep);
+        // ── Name plate ───────────────────────────────────────────────────────────
         const nameBg = this.scene.add.graphics();
-        nameBg.fillStyle(0x1A0835, 0.95);
-        nameBg.fillRect(46, 4, 80, 12);
-        nameBg.lineStyle(1, 0xCCA820, 0.7);
-        nameBg.strokeRect(46, 4, 80, 12);
+        nameBg.fillStyle(0x1A0840, 0.95);
+        nameBg.fillRoundedRect(TEXT_X, 5, 90, 14, 2);
+        nameBg.lineStyle(1, 0xCCA820, 0.8);
+        nameBg.strokeRoundedRect(TEXT_X, 5, 90, 14, 2);
         cont.add(nameBg);
-        // Message text (typewriter)
-        this.msgText = this.scene.add.text(48, 18, '', {
+        // Name text (created later in showPage)
+        this.nameText = this.scene.add.text(TEXT_X + 5, 8, '', {
+            fontSize: '8px',
+            fontFamily: 'monospace',
+            color: '#FFD060',
+        });
+        cont.add(this.nameText);
+        // ── Message text ─────────────────────────────────────────────────────────
+        this.msgText = this.scene.add.text(TEXT_X, 24, '', {
             fontSize: '7px',
             fontFamily: 'monospace',
             color: '#E8E4FF',
-            wordWrap: { width: boxW - 54, useAdvancedWrap: true },
-            lineSpacing: 2,
+            wordWrap: { width: TEXT_W, useAdvancedWrap: true },
+            lineSpacing: 3,
         });
         cont.add(this.msgText);
-        // Advance indicator
-        this.indicator = this.scene.add.text(boxW - 10, boxH - 10, '▼', {
-            fontSize: '7px',
+        // ── Advance indicator ────────────────────────────────────────────────────
+        this.indicator = this.scene.add.text(BOX_W - 7, BOX_H - 8, '▼', {
+            fontSize: '6px',
             fontFamily: 'monospace',
             color: '#CCA820',
         }).setOrigin(1, 1);
@@ -115,14 +155,28 @@ export class DialogueSystem {
         this.scene.tweens.add({
             targets: this.indicator,
             alpha: 0,
-            duration: 500,
+            duration: 480,
             yoyo: true,
             repeat: -1,
             ease: 'Stepped',
             easeParams: [1],
         });
         this.indicator.setVisible(false);
+        // ── Page counter ─────────────────────────────────────────────────────────
+        this.pageCounter = this.scene.add.text(BOX_W - 8, 6, '', {
+            fontSize: '5px',
+            fontFamily: 'monospace',
+            color: '#886644',
+        }).setOrigin(1, 0);
+        cont.add(this.pageCounter);
         this.container = cont;
+        // Slide-in animation
+        this.scene.tweens.add({
+            targets: cont,
+            y: BOX_Y,
+            duration: 220,
+            ease: 'Back.easeOut',
+        });
     }
     // ── Page display ─────────────────────────────────────────────────────────────
     showPage(idx) {
@@ -131,37 +185,34 @@ export class DialogueSystem {
             return;
         }
         const page = this.pages[idx];
-        // Clear old portrait/name objects added in previous page
-        this.container.getAll().forEach(obj => {
-            if (obj.name === 'portrait-img' || obj.name === 'name-text')
-                obj.destroy();
-        });
+        // Remove previous portrait
+        if (this.portraitImg) {
+            this.container.remove(this.portraitImg, true);
+            this.portraitImg = null;
+        }
         // Portrait image
         const texKey = page.portrait;
         if (this.scene.textures.exists(texKey)) {
-            const img = this.scene.add.image(23, 23, texKey).setOrigin(0.5, 0.5);
-            img.setName('portrait-img');
+            const img = this.scene.add.image(5 + PORT_SIZE / 2, 5 + PORT_SIZE / 2, texKey).setOrigin(0.5, 0.5);
+            // Scale portrait to fit the area
+            img.setDisplaySize(PORT_SIZE - 4, PORT_SIZE - 4);
+            this.portraitImg = img;
             this.container.add(img);
         }
         else {
-            // Fallback: colored square
             const g = this.scene.add.graphics();
-            g.fillStyle(0x443366, 1);
-            g.fillRect(6, 6, 34, 34);
-            g.name = 'portrait-img';
+            g.fillStyle(0x2A1050, 1);
+            g.fillRoundedRect(7, 7, PORT_SIZE - 4, PORT_SIZE - 4, 2);
+            this.portraitImg = g;
             this.container.add(g);
         }
-        // Name text
-        const boxW = W - 8;
-        const nameText = this.scene.add.text(50, 6, page.name, {
-            fontSize: '6px',
-            fontFamily: 'monospace',
-            color: '#FFD070',
-        });
-        nameText.setName('name-text');
-        this.container.add(nameText);
-        nameText;
-        boxW; // suppress unused
+        // Update name
+        if (this.nameText)
+            this.nameText.setText(page.name);
+        // Page counter
+        if (this.pageCounter) {
+            this.pageCounter.setText(`${idx + 1}/${this.pages.length}`);
+        }
         // Start typewriter
         this.fullText = page.text;
         this.charIdx = 0;
@@ -170,22 +221,34 @@ export class DialogueSystem {
         if (this.msgText)
             this.msgText.setText('');
         this.stopTyping();
-        this.typingTimer = this.scene.time.addEvent({
-            delay: 28,
-            callback: this.typeNextChar,
-            callbackScope: this,
-            repeat: this.fullText.length - 1,
-        });
+        this.scheduleNextChar();
     }
-    typeNextChar() {
-        if (!this.msgText)
-            return;
-        this.charIdx++;
-        this.msgText.setText(this.fullText.slice(0, this.charIdx));
+    // ── Typewriter with punctuation pauses ───────────────────────────────────────
+    scheduleNextChar() {
         if (this.charIdx >= this.fullText.length) {
             this.typingDone = true;
             this.indicator?.setVisible(true);
+            return;
         }
+        const ch = this.fullText[this.charIdx];
+        const delay = this.charDelay(ch);
+        this.typingTimer = this.scene.time.delayedCall(delay, () => {
+            this.charIdx++;
+            if (this.msgText)
+                this.msgText.setText(this.fullText.slice(0, this.charIdx));
+            this.scheduleNextChar();
+        });
+    }
+    charDelay(ch) {
+        if (ch === '.' || ch === '!' || ch === '?')
+            return BASE_DELAY * 5;
+        if (ch === ',' || ch === ';')
+            return BASE_DELAY * 2.5;
+        if (ch === ' ')
+            return BASE_DELAY * 0.5;
+        if (ch === '\n')
+            return BASE_DELAY * 3;
+        return BASE_DELAY;
     }
     finishTyping() {
         this.stopTyping();
@@ -207,7 +270,19 @@ export class DialogueSystem {
             this.showPage(this.pageIdx);
         }
         else {
-            this.close();
+            // Slide out before closing
+            if (this.container) {
+                this.scene.tweens.add({
+                    targets: this.container,
+                    y: BOX_Y + BOX_H + 4,
+                    duration: 180,
+                    ease: 'Back.easeIn',
+                    onComplete: () => this.close(),
+                });
+            }
+            else {
+                this.close();
+            }
         }
     }
     close() {
