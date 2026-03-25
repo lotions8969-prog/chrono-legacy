@@ -89,8 +89,52 @@ for (let x = 16; x < 24; x++) for (let y = 6; y < 24; y++) MAP_FOREST[y][x] = 3;
 MAP_FOREST[1][18] = 3; MAP_FOREST[2][18] = 3; MAP_FOREST[3][18] = 3; // north exit
 for (let y = 24; y < 29; y++) MAP_FOREST[y][18] = 3; // south exit
 
-const COLS_V = MAP_VILLAGE[0].length;
-const ROWS_V = MAP_VILLAGE.length;
+// ── Dungeon map (40×30) ──────────────────────────────────────────────────────
+const MAP_DUNGEON: number[][] = (() => {
+  const DW = 40, DH = 30;
+  const m: number[][] = Array.from({ length: DH }, () => Array(DW).fill(2));
+  const fill = (x: number, y: number, w: number, h: number, t: number) => {
+    for (let dy = 0; dy < h; dy++)
+      for (let dx = 0; dx < w; dx++)
+        if (y + dy >= 0 && y + dy < DH && x + dx >= 0 && x + dx < DW)
+          m[y + dy][x + dx] = t;
+  };
+
+  // Entrance hall (lower section)
+  fill(3, 16, 34, 7, 8);
+
+  // Three rooms at top
+  fill(1,  2, 11, 7, 8);   // left room
+  fill(13, 1, 14, 8, 8);   // center boss room
+  fill(27, 2, 12, 7, 8);   // right room
+
+  // Vertical corridors connecting hall to rooms
+  fill(3,  9, 4, 7, 3);    // left corridor
+  fill(17, 9, 6, 7, 3);    // center corridor
+  fill(31, 9, 4, 7, 3);    // right corridor
+
+  // Horizontal connectors
+  fill(7,  9, 10, 3, 3);   // left ↔ center
+  fill(23, 9,  8, 3, 3);   // center ↔ right
+
+  // South entrance corridor
+  fill(17, 23, 6, 7, 3);   // reaches south wall
+
+  // Pillars in rooms for visual interest
+  m[4][3] = 2;  m[4][8] = 2;               // left room
+  m[3][15] = 2; m[3][19] = 2; m[3][23] = 2; m[7][16] = 2; m[7][22] = 2; // center
+  m[4][29] = 2; m[4][36] = 2;              // right room
+  m[17][8] = 2; m[17][15] = 2; m[17][23] = 2; m[17][30] = 2;  // hall pillars
+  m[21][8] = 2; m[21][15] = 2; m[21][23] = 2; m[21][30] = 2;
+
+  // Water hazards
+  fill(6, 11, 2, 2, 1);   // left corridor
+  fill(25, 10, 2, 2, 1);  // right corridor
+  fill(15, 4, 2, 2, 1);   // boss room
+  fill(19, 18, 2, 2, 1);  // entrance hall
+
+  return m;
+})();
 
 // ── Zone definitions map ──────────────────────────────────────────────────────
 function makeZones(): Record<ZoneKey, ZoneData> {
@@ -141,23 +185,31 @@ function makeZones(): Record<ZoneKey, ZoneData> {
       ],
       exits: [
         { tx: 18, ty: 28, toZone: 'village', toTx: 10, toTy: 2 },
+        { tx: 18, ty:  1, toZone: 'dungeon', toTx: 19, toTy: 26 },
       ],
     },
     dungeon: {
-      map: MAP_FOREST, // reuse forest map with dungeon bg
+      map: MAP_DUNGEON,
       bgKey: 'battle_bg_dungeon',
       musicTrack: 'field',
-      label: 'Truce Canyon',
-      playerStart: [18, 26],
+      label: 'Ancient Ruins',
+      playerStart: [19, 26],
       enemySpawns: [
-        [12, 10, 'GOLEM'],
-        [25, 12, 'CRYSTAL_WRAITH'],
-        [15, 20, 'GOLEM'],
-        [22, 22, 'CRYSTAL_WRAITH'],
+        [18, 20, 'GOLEM'],
+        [10, 20, 'CRYSTAL_WRAITH'],
+        [28, 19, 'CRYSTAL_WRAITH'],
+        [ 4,  5, 'BAT'],
+        [ 8,  5, 'BAT'],
+        [16,  4, 'CRYSTAL_WRAITH'],
+        [22,  4, 'CRYSTAL_WRAITH'],
+        [32,  5, 'GOLEM'],
+        [36,  4, 'BAT'],
       ],
-      npcSpawns: [],
+      npcSpawns: [
+        { tx: 20, ty: 20, scriptKey: 'scientist', npcFrame: 8, facing: 'down' },
+      ],
       exits: [
-        { tx: 18, ty: 28, toZone: 'village', toTx: 10, toTy: 2 },
+        { tx: 19, ty: 28, toZone: 'forest', toTx: 18, toTy: 2 },
       ],
     },
   };
@@ -247,19 +299,53 @@ export class World extends Phaser.Scene {
 
   // ── Parallax background ──────────────────────────────────────────────────────
   private createParallaxBackground(): void {
-    const zd = this.zones[this.currentZone];
+    const zd     = this.zones[this.currentZone];
     const mapPxW = zd.map[0].length * TILE.SIZE;
-    void mapPxW;
 
+    if (this.currentZone === 'dungeon') {
+      // ── Cave / underground background ──
+      const bg = this.add.graphics().setScrollFactor(0).setDepth(-30);
+      bg.fillGradientStyle(0x04020C, 0x04020C, 0x0A0618, 0x0A0618, 1);
+      bg.fillRect(0, 0, W, H);
+
+      // Ceiling gradient (cave top)
+      const ceil = this.add.graphics().setScrollFactor(0).setDepth(-29);
+      ceil.fillGradientStyle(0x020108, 0x020108, 0x04020C, 0x04020C, 0.9);
+      ceil.fillRect(0, 0, W, H * 0.25);
+
+      // Distant stone columns (parallax)
+      const cols = this.add.graphics().setScrollFactor(0.18, 0).setDepth(-25);
+      cols.fillStyle(0x0E0820, 0.6);
+      for (let i = 0; i < 18; i++) {
+        const cx = i * 44 + 8;
+        const ch = 20 + (i % 3) * 12;
+        cols.fillRect(cx, 0, 6, ch);      // stalactite
+        cols.fillRect(cx + 20, H - ch, 5, ch); // stalagmite
+      }
+
+      // Atmosphere: subtle blue-purple fog bands
+      const fog = this.add.graphics().setScrollFactor(0.08, 0).setDepth(-24);
+      fog.fillStyle(0x1A0840, 0.08);
+      for (let i = 0; i < 4; i++) {
+        fog.fillEllipse(i * mapPxW * 0.3 + mapPxW * 0.1, H * 0.5, mapPxW * 0.35, H * 0.6);
+      }
+      return;
+    }
+
+    // ── Outdoor (village / forest) background ──
     const sky = this.add.graphics().setScrollFactor(0).setDepth(-30);
-    sky.fillGradientStyle(0x102040, 0x102040, 0x203060, 0x304080, 1);
+    if (this.currentZone === 'forest') {
+      sky.fillGradientStyle(0x0A1830, 0x0A1830, 0x182840, 0x203050, 1);
+    } else {
+      sky.fillGradientStyle(0x102040, 0x102040, 0x203060, 0x304080, 1);
+    }
     sky.fillRect(0, 0, W, H);
 
     const mountainBg = this.add.graphics().setScrollFactor(0.3, 0.5).setDepth(-20);
-    this.drawMountainLayer(mountainBg, mapPxW ?? 800);
+    this.drawMountainLayer(mountainBg, mapPxW);
 
     const cloudBg = this.add.graphics().setScrollFactor(0.15, 0).setDepth(-25);
-    this.drawClouds(cloudBg, mapPxW ?? 800);
+    this.drawClouds(cloudBg, mapPxW);
   }
 
   private drawMountainLayer(g: Phaser.GameObjects.Graphics, mapW: number): void {
@@ -306,62 +392,90 @@ export class World extends Phaser.Scene {
 
   // ── Decorations ──────────────────────────────────────────────────────────────
   private placeDecorations(): void {
-    const treePositions = [
-      [10, 1], [11, 2], [12, 1], [13, 3], [11, 4],
-      [10, 5], [14, 1], [15, 2], [16, 3],
-      [1, 22], [2, 24], [1, 28], [2, 30],
-      [47, 5], [47, 8], [47, 12], [47, 16],
-    ];
-    treePositions.forEach(([tx, ty]) => {
-      const depth = ty * TILE.SIZE + TILE.SIZE * 2 - 1;
-      this.add.image(
-        tx * TILE.SIZE + TILE.SIZE / 2,
-        ty * TILE.SIZE + TILE.SIZE * 2,
-        'tree',
-      ).setOrigin(0.5, 1).setDepth(depth);
-    });
-
-    const buildingPositions = [[12, 9], [18, 15]];
-    buildingPositions.forEach(([tx, ty]) => {
-      const bx = tx * TILE.SIZE + TILE.SIZE * 2;
-      const by = ty * TILE.SIZE + TILE.SIZE * 2;
-      this.add.image(bx, by, 'building').setOrigin(0.5, 1).setDepth(by - 1);
-    });
-
-    // Time gate
-    const gate = this.add.image(44 * TILE.SIZE + TILE.SIZE / 2, 13 * TILE.SIZE, 'gate')
-      .setOrigin(0.5, 1).setDepth(700);
-    this.tweens.add({ targets: gate, alpha: 0.7, scaleX: 1.05, scaleY: 1.05, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.time.addEvent({ delay: 300, callback: () => {
-      this.tweens.add({ targets: gate, tint: 0x88AAFF, duration: 150, yoyo: true });
-    }, repeat: -1 });
-
-    // Save crystal
-    const crystal = this.add.image(16 * TILE.SIZE + 8, 12 * TILE.SIZE - 2, 'save_crystal')
-      .setOrigin(0.5, 1).setDepth(500);
-    this.tweens.add({ targets: crystal, alpha: 0.6, y: crystal.y - 2, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.time.addEvent({ delay: 200, callback: () => {
-      const px = crystal.x + Phaser.Math.Between(-6, 6);
-      const py = crystal.y + Phaser.Math.Between(-8, 0);
-      const spark = this.add.rectangle(px, py, 1, 1, 0xAADDFF, 0.8).setDepth(501);
-      this.tweens.add({ targets: spark, y: py - 6, alpha: 0, duration: 600, onComplete: () => spark.destroy() });
-    }, repeat: -1 });
-
-    // Water shimmer
-    this.time.addEvent({ delay: 400, callback: () => {
-      const lakeX = Phaser.Math.Between(35, 39) * TILE.SIZE + 4;
-      const lakeY = Phaser.Math.Between(5, 9) * TILE.SIZE + 4;
-      const shimmer = this.add.rectangle(lakeX, lakeY, 3, 1, 0xAADDFF, 0.5).setDepth(1);
-      this.tweens.add({ targets: shimmer, alpha: 0, x: lakeX + 3, duration: 700, onComplete: () => shimmer.destroy() });
-    }, repeat: -1 });
-
-    // Exit zone indicator (north exit to forest)
     const zd = this.zones[this.currentZone];
+
+    if (this.currentZone === 'village') {
+      // Trees
+      const treePos = [
+        [10, 1], [11, 2], [12, 1], [13, 3], [11, 4],
+        [10, 5], [14, 1], [15, 2], [16, 3],
+        [1, 22], [2, 24], [1, 28], [2, 30],
+        [47, 5], [47, 8], [47, 12], [47, 16],
+      ];
+      treePos.forEach(([tx, ty]) => {
+        this.add.image(
+          tx * TILE.SIZE + TILE.SIZE / 2,
+          ty * TILE.SIZE + TILE.SIZE * 2,
+          'tree',
+        ).setOrigin(0.5, 1).setDepth(ty * TILE.SIZE + TILE.SIZE * 2 - 1);
+      });
+
+      // Buildings
+      [[12, 9], [18, 15]].forEach(([tx, ty]) => {
+        const bx = tx * TILE.SIZE + TILE.SIZE * 2;
+        const by = ty * TILE.SIZE + TILE.SIZE * 2;
+        this.add.image(bx, by, 'building').setOrigin(0.5, 1).setDepth(by - 1);
+      });
+
+      // Time gate
+      const gate = this.add.image(44 * TILE.SIZE + TILE.SIZE / 2, 13 * TILE.SIZE, 'gate')
+        .setOrigin(0.5, 1).setDepth(700);
+      this.tweens.add({ targets: gate, alpha: 0.7, scaleX: 1.05, scaleY: 1.05, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      this.time.addEvent({ delay: 300, callback: () => {
+        this.tweens.add({ targets: gate, tint: 0x88AAFF, duration: 150, yoyo: true });
+      }, repeat: -1 });
+
+      // Save crystal
+      const crystal = this.add.image(16 * TILE.SIZE + 8, 12 * TILE.SIZE - 2, 'save_crystal')
+        .setOrigin(0.5, 1).setDepth(500);
+      this.tweens.add({ targets: crystal, alpha: 0.6, y: crystal.y - 2, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      this.time.addEvent({ delay: 200, callback: () => {
+        const px = crystal.x + Phaser.Math.Between(-6, 6);
+        const py = crystal.y + Phaser.Math.Between(-8, 0);
+        const spark = this.add.rectangle(px, py, 1, 1, 0xAADDFF, 0.8).setDepth(501);
+        this.tweens.add({ targets: spark, y: py - 6, alpha: 0, duration: 600, onComplete: () => spark.destroy() });
+      }, repeat: -1 });
+
+      // Water shimmer
+      this.time.addEvent({ delay: 400, callback: () => {
+        const lakeX = Phaser.Math.Between(35, 39) * TILE.SIZE + 4;
+        const lakeY = Phaser.Math.Between(5, 9) * TILE.SIZE + 4;
+        const shimmer = this.add.rectangle(lakeX, lakeY, 3, 1, 0xAADDFF, 0.5).setDepth(1);
+        this.tweens.add({ targets: shimmer, alpha: 0, x: lakeX + 3, duration: 700, onComplete: () => shimmer.destroy() });
+      }, repeat: -1 });
+    }
+
+    if (this.currentZone === 'dungeon') {
+      // Torch flicker effects at pillar positions
+      const torchPos = [[8, 17], [14, 17], [22, 17], [29, 17], [8, 21], [29, 21]];
+      torchPos.forEach(([tx, ty]) => {
+        const wx = tx * TILE.SIZE + 8;
+        const wy = ty * TILE.SIZE - 4;
+        this.time.addEvent({ delay: 120 + Math.random() * 80, callback: () => {
+          const spark = this.add.rectangle(
+            wx + Phaser.Math.Between(-3, 3),
+            wy + Phaser.Math.Between(-2, 2),
+            2, 2, Phaser.Math.RND.pick([0xFFAA22, 0xFF8800, 0xFFCC44]), 0.9,
+          ).setDepth(9);
+          this.tweens.add({ targets: spark, y: wy - 5, alpha: 0, duration: 400, onComplete: () => spark.destroy() });
+        }, repeat: -1 });
+      });
+
+      // Drip effects from ceiling
+      this.time.addEvent({ delay: 800, callback: () => {
+        const dx = Phaser.Math.Between(2, 38) * TILE.SIZE + 4;
+        const drip = this.add.rectangle(dx, 2, 1, 3, 0x6688AA, 0.6).setDepth(9);
+        this.tweens.add({ targets: drip, y: Phaser.Math.Between(24, 48), alpha: 0, duration: 900, onComplete: () => drip.destroy() });
+      }, repeat: -1 });
+    }
+
+    // Exit zone indicators (all zones)
     zd.exits.forEach(exit => {
       const ex = exit.tx * TILE.SIZE + TILE.SIZE / 2;
       const ey = exit.ty * TILE.SIZE + TILE.SIZE / 2;
+      const col = this.currentZone === 'dungeon' ? 0xFF8844 : 0xAAFF88;
       const indicator = this.add.graphics().setDepth(5);
-      indicator.lineStyle(2, 0xAAFF88, 0.6);
+      indicator.lineStyle(2, col, 0.6);
       indicator.strokeCircle(ex, ey, TILE.SIZE);
       this.tweens.add({ targets: indicator, alpha: 0.3, duration: 800, yoyo: true, repeat: -1 });
     });

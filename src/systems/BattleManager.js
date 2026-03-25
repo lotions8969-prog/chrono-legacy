@@ -24,6 +24,9 @@ export class BattleManager {
         this.bgKey = 'battle_bg_field';
         // Stored original positions (to restore after battle)
         this.origPositions = new Map();
+        // Enemy HP bars (world-space, no scroll factor adjustment needed since cam is frozen)
+        this.enemyHpBars = [];
+        this.enemyLabels = [];
         this.scene = scene;
         this.vfx = new ParticleManager(scene);
         this.ui = new BattleUI(scene);
@@ -45,7 +48,6 @@ export class BattleManager {
         this.playerUnits = playerSprites.map(e => e.unit);
         this.enemyUnits = enemyEntries.map(e => e.unit);
         this.engagedEnemyObjs = enemyEntries.map(e => e.sprite);
-        // Store original positions
         this.origPositions.clear();
         [...playerSprites, ...enemyEntries].forEach(({ sprite }) => {
             this.origPositions.set(sprite, { x: sprite.x, y: sprite.y });
@@ -53,7 +55,7 @@ export class BattleManager {
         [...this.playerUnits, ...this.enemyUnits].forEach(u => { u.atb = 0; u.waitingForInput = false; });
         const cam = this.scene.cameras.main;
         cam.stopFollow();
-        // Screen flash on battle start
+        // Screen flash
         const flash = this.scene.add.rectangle(0, 0, W, H, 0xFFFFFF, 1)
             .setScrollFactor(0).setDepth(200).setOrigin(0, 0);
         this.scene.tweens.add({
@@ -72,11 +74,10 @@ export class BattleManager {
                 duration: 300,
                 ease: 'Quad.easeOut',
             });
-            // Semi-transparent dark border vignette
             this.battleOverlay = this.scene.add.rectangle(0, 0, W, H, 0x000000, 0.15)
                 .setScrollFactor(0).setDepth(3).setOrigin(0, 0);
         });
-        // Zoom camera slightly for drama
+        // Zoom camera
         this.scene.tweens.add({
             targets: cam,
             zoom: 1.05,
@@ -85,7 +86,6 @@ export class BattleManager {
         });
         const cx = cam.scrollX;
         const cy = cam.scrollY;
-        // Battle positions: party on left-center, enemies on right
         const partySlots = [
             [cx + 48, cy + H * 0.62],
             [cx + 32, cy + H * 0.74],
@@ -123,6 +123,7 @@ export class BattleManager {
     onEngageComplete() {
         this._phase = 'active';
         this.ui.showBanner('Battle Start!', '#FFE060');
+        this.buildEnemyBars();
         this.scene.time.delayedCall(200, () => this.updateStatusUI());
     }
     // ── Update ────────────────────────────────────────────────────────────────────
@@ -145,6 +146,78 @@ export class BattleManager {
             }
         });
         this.updateStatusUI();
+        this.updateEnemyBars();
+    }
+    // ── Enemy HP bars ─────────────────────────────────────────────────────────────
+    buildEnemyBars() {
+        this.clearEnemyBars();
+        this.enemyUnits.forEach(unit => {
+            const bar = this.scene.add.graphics().setDepth(6);
+            this.enemyHpBars.push(bar);
+            this.drawEnemyBar(bar, unit);
+            const lbl = this.scene.add.text(unit.sprite.x, unit.sprite.y - 26, unit.name, { fontSize: '5px', fontFamily: 'monospace', color: '#FFEECC' }).setOrigin(0.5, 1).setDepth(7);
+            this.enemyLabels.push(lbl);
+        });
+    }
+    drawEnemyBar(bar, unit) {
+        bar.clear();
+        const BAR_W = 26;
+        const BAR_H = 3;
+        const sx = unit.sprite.x - BAR_W / 2;
+        const sy = unit.sprite.y - 22;
+        const pct = Math.max(0, unit.hp / unit.maxHp);
+        const col = pct > 0.5 ? 0x44CC44 : pct > 0.25 ? 0xCCAA22 : 0xCC3322;
+        bar.fillStyle(0x220000, 0.85);
+        bar.fillRect(sx, sy, BAR_W, BAR_H);
+        bar.fillStyle(col, 1);
+        bar.fillRect(sx, sy, Math.ceil(BAR_W * pct), BAR_H);
+        bar.lineStyle(1, 0x888888, 0.6);
+        bar.strokeRect(sx, sy, BAR_W, BAR_H);
+    }
+    updateEnemyBars() {
+        this.enemyUnits.forEach((unit, i) => {
+            const bar = this.enemyHpBars[i];
+            const lbl = this.enemyLabels[i];
+            if (bar)
+                this.drawEnemyBar(bar, unit);
+            if (lbl) {
+                lbl.setPosition(unit.sprite.x, unit.sprite.y - 26);
+                lbl.setVisible(unit.hp > 0);
+            }
+        });
+    }
+    clearEnemyBars() {
+        this.enemyHpBars.forEach(b => b.destroy());
+        this.enemyLabels.forEach(l => l.destroy());
+        this.enemyHpBars = [];
+        this.enemyLabels = [];
+    }
+    // ── Attack animation ──────────────────────────────────────────────────────────
+    /**
+     * Tween `attacker` 50% toward `target`, call `onHit`, then return.
+     * Calls `onDone` after the return tween completes.
+     */
+    doAttackAnim(attacker, target, onHit, onDone) {
+        const ox = attacker.x;
+        const oy = attacker.y;
+        const tx = ox + (target.x - ox) * 0.5;
+        const ty = oy + (target.y - oy) * 0.5;
+        this.scene.tweens.add({
+            targets: attacker,
+            x: tx, y: ty,
+            duration: 130,
+            ease: 'Quad.easeIn',
+            onComplete: () => {
+                onHit();
+                this.scene.tweens.add({
+                    targets: attacker,
+                    x: ox, y: oy,
+                    duration: 190,
+                    ease: 'Quad.easeOut',
+                    onComplete: onDone,
+                });
+            },
+        });
     }
     // ── Enemy AI (type-aware) ─────────────────────────────────────────────────────
     enemyAI(unit) {
@@ -156,58 +229,70 @@ export class BattleManager {
             this.checkDefeat();
             return;
         }
-        // Type-specific behaviors
         const name = unit.name.toLowerCase();
-        let dmg = 0;
-        let effectKey = 'slash';
+        const atkSpr = unit.sprite;
+        const defSpr = target.sprite;
+        const finish = () => {
+            this.scene.time.delayedCall(80, () => {
+                this.atb.reset(unit);
+                this._phase = 'active';
+                this.checkDefeat();
+            });
+        };
         if (name.includes('bat')) {
-            // Bat: fast double-hit
-            dmg = this.calcDamage(unit, target, 'physical', 0.7);
-            target.hp = Math.max(0, target.hp - dmg);
-            this.vfx.showDamageNumber(target.sprite.x, target.sprite.y - 12, dmg, 'physical');
-            this.flashSprite(target.sprite, 0xFF6644);
-            effectKey = 'slash';
-            // Second hit
-            this.scene.time.delayedCall(200, () => {
-                if (this._phase !== 'animating')
-                    return;
-                const dmg2 = this.calcDamage(unit, target, 'physical', 0.7);
-                target.hp = Math.max(0, target.hp - dmg2);
-                this.vfx.showDamageNumber(target.sprite.x, target.sprite.y - 16, dmg2, 'physical');
-                this.flashSprite(target.sprite, 0xFF4422);
+            // Fast double-hit
+            this.doAttackAnim(atkSpr, defSpr, () => {
+                const d1 = this.calcDamage(unit, target, 'physical', 0.7);
+                target.hp = Math.max(0, target.hp - d1);
+                this.vfx.showDamageNumber(defSpr.x, defSpr.y - 12, d1, 'physical');
+                this.flashSprite(target.sprite, 0xFF6644);
+                this.vfx.play('slash', defSpr.x, defSpr.y, undefined);
+            }, () => {
+                this.scene.time.delayedCall(60, () => {
+                    if (this._phase !== 'animating')
+                        return;
+                    this.doAttackAnim(atkSpr, defSpr, () => {
+                        const d2 = this.calcDamage(unit, target, 'physical', 0.7);
+                        target.hp = Math.max(0, target.hp - d2);
+                        this.vfx.showDamageNumber(defSpr.x, defSpr.y - 16, d2, 'physical');
+                        this.flashSprite(target.sprite, 0xFF4422);
+                    }, finish);
+                });
             });
         }
         else if (name.includes('golem')) {
-            // Golem: heavy slow hit
-            dmg = this.calcDamage(unit, target, 'physical', 1.4);
-            target.hp = Math.max(0, target.hp - dmg);
-            this.vfx.showDamageNumber(target.sprite.x, target.sprite.y - 12, dmg, 'physical');
-            this.flashSprite(target.sprite, 0xFF2200);
-            effectKey = 'slash';
-            this.vfx.play('slash', target.sprite.x, target.sprite.y, undefined);
+            // Heavy slow hit + screen shake
+            this.doAttackAnim(atkSpr, defSpr, () => {
+                const d = this.calcDamage(unit, target, 'physical', 1.4);
+                target.hp = Math.max(0, target.hp - d);
+                this.vfx.showDamageNumber(defSpr.x, defSpr.y - 12, d, 'physical');
+                this.flashSprite(target.sprite, 0xFF2200);
+                this.scene.cameras.main.shake(110, 0.005);
+                this.vfx.play('slash', defSpr.x, defSpr.y, undefined);
+            }, finish);
         }
         else if (name.includes('wraith') || name.includes('crystal')) {
-            // Wraith: magic attack
-            dmg = this.calcDamage(unit, target, 'ice', 1.2);
-            target.hp = Math.max(0, target.hp - dmg);
-            this.vfx.showDamageNumber(target.sprite.x, target.sprite.y - 12, dmg, 'ice');
+            // Magic ranged attack (no physical lunge)
+            const d = this.calcDamage(unit, target, 'ice', 1.2);
+            target.hp = Math.max(0, target.hp - d);
+            this.vfx.showDamageNumber(defSpr.x, defSpr.y - 12, d, 'ice');
             this.flashSprite(target.sprite, 0xAADDFF);
-            effectKey = 'crystal';
-            this.vfx.play('crystal', target.sprite.x, target.sprite.y, undefined);
+            this.vfx.play('crystal', defSpr.x, defSpr.y, undefined);
+            this.scene.time.delayedCall(400, () => {
+                this.atb.reset(unit);
+                this._phase = 'active';
+                this.checkDefeat();
+            });
         }
         else {
-            // Default: basic attack
-            dmg = this.calcDamage(unit, target, 'physical', 1.0);
-            target.hp = Math.max(0, target.hp - dmg);
-            this.vfx.showDamageNumber(target.sprite.x, target.sprite.y - 12, dmg, 'physical');
-            this.flashSprite(target.sprite, 0xFF4444);
+            // Default physical
+            this.doAttackAnim(atkSpr, defSpr, () => {
+                const d = this.calcDamage(unit, target, 'physical', 1.0);
+                target.hp = Math.max(0, target.hp - d);
+                this.vfx.showDamageNumber(defSpr.x, defSpr.y - 12, d, 'physical');
+                this.flashSprite(target.sprite, 0xFF4444);
+            }, finish);
         }
-        void effectKey;
-        this.scene.time.delayedCall(380, () => {
-            this.atb.reset(unit);
-            this._phase = 'active';
-            this.checkDefeat();
-        });
     }
     // ── Player command ────────────────────────────────────────────────────────────
     tryShowCommand() {
@@ -276,7 +361,7 @@ export class BattleManager {
                 break;
         }
     }
-    // ── Execute action ────────────────────────────────────────────────────────────
+    // ── Execute player action ─────────────────────────────────────────────────────
     executePlayerAction(actor, targets, techKey) {
         this.commandQueue.shift();
         const def = TECHS[techKey];
@@ -301,11 +386,20 @@ export class BattleManager {
                 this.atb.reset(co);
             }
         }
-        const vfxX = targets[0]?.sprite.x ?? this.scene.cameras.main.scrollX + W / 2;
-        const vfxY = targets[0]?.sprite.y ?? this.scene.cameras.main.scrollY + H / 2;
+        const cam = this.scene.cameras.main;
+        const vfxX = targets[0]?.sprite.x ?? cam.scrollX + W / 2;
+        const vfxY = targets[0]?.sprite.y ?? cam.scrollY + H / 2;
         const isHeal = def.element === 'heal';
         const safeKey = def.effectKey ?? 'default';
-        this.vfx.play(safeKey, vfxX, vfxY, () => {
+        const finishAction = () => {
+            this.atb.reset(actor);
+            actor.waitingForInput = false;
+            this._phase = 'active';
+            this.checkVictory();
+            if (this._phase === 'active')
+                this.tryShowCommand();
+        };
+        const applyEffects = () => {
             targets.forEach(t => {
                 if (isHeal) {
                     const amt = Math.floor(actor.atk * def.power * 0.5 + 15);
@@ -317,15 +411,26 @@ export class BattleManager {
                     t.hp = Math.max(0, t.hp - dmg);
                     this.vfx.showDamageNumber(t.sprite.x, t.sprite.y - 12, dmg, def.element);
                     this.flashSprite(t.sprite, 0xFFFFFF);
+                    if (dmg > 10)
+                        this.scene.cameras.main.shake(70, 0.003);
                 }
             });
-            this.atb.reset(actor);
-            actor.waitingForInput = false;
-            this._phase = 'active';
-            this.checkVictory();
-            if (this._phase === 'active')
-                this.tryShowCommand();
-        });
+        };
+        const firstTarget = targets[0];
+        if (!isHeal && firstTarget && def.target !== 'all_enemies') {
+            // Physical single-target: lunge animation
+            this.doAttackAnim(actor.sprite, firstTarget.sprite, () => {
+                applyEffects();
+                this.vfx.play(safeKey, vfxX, vfxY, undefined);
+            }, finishAction);
+        }
+        else {
+            // Heal or AoE: immediate VFX then apply
+            this.vfx.play(safeKey, vfxX, vfxY, () => {
+                applyEffects();
+                finishAction();
+            });
+        }
     }
     // ── Target selection ──────────────────────────────────────────────────────────
     pickEnemyTargets(targetType) {
@@ -345,6 +450,7 @@ export class BattleManager {
         if (this.enemyUnits.every(u => u.hp <= 0)) {
             this._phase = 'victory';
             this.ui.hideCommandMenu();
+            this.clearEnemyBars();
             const expGain = this.enemyUnits.reduce((s, u) => s + (u.exp ?? 5), 0);
             const goldGain = this.enemyUnits.reduce((s, u) => s + (u.gold ?? 2), 0);
             this.scene.time.delayedCall(200, () => {
@@ -360,6 +466,7 @@ export class BattleManager {
         if (this.playerUnits.every(u => u.hp <= 0)) {
             this._phase = 'defeat';
             this.ui.hideCommandMenu();
+            this.clearEnemyBars();
             this.ui.showBanner('Defeated...', '#FF4444', 2000);
             this.scene.time.delayedCall(2200, () => this.endBattle(0, 0));
         }
@@ -383,14 +490,12 @@ export class BattleManager {
     }
     // ── End battle ────────────────────────────────────────────────────────────────
     endBattle(expGain, goldGain) {
-        // Restore camera zoom
         this.scene.tweens.add({
             targets: this.scene.cameras.main,
             zoom: 1,
             duration: 300,
             ease: 'Sine.easeInOut',
         });
-        // Fade out battle background
         if (this.battleBg) {
             this.scene.tweens.add({
                 targets: this.battleBg,
@@ -403,6 +508,7 @@ export class BattleManager {
             this.battleOverlay.destroy();
             this.battleOverlay = null;
         }
+        this.clearEnemyBars();
         this._phase = 'idle';
         this.menuOpen = false;
         this.ui.destroy();
