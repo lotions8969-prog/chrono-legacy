@@ -242,7 +242,7 @@ export class ParticleManager {
     this.screenFlash(0xFF4400, 0.45);
     this.screenShake(4, 180);
     this.fxSlash(x, y);
-    setTimeout(() => this.fxFire(x, y, cb), 100);
+    this.scene.time.delayedCall(100, () => this.fxFire(x, y, cb));
   }
 
   // ── Ice Tackle (dual tech) ────────────────────────────────────────────────
@@ -250,7 +250,7 @@ export class ParticleManager {
     this.screenFlash(0x44AAFF, 0.45);
     this.screenShake(4, 180);
     this.fxSlash(x, y);
-    setTimeout(() => this.fxIce(x, y, cb), 100);
+    this.scene.time.delayedCall(100, () => this.fxIce(x, y, cb));
   }
 
   // ── Crystal (wraith attack) ────────────────────────────────────────────────

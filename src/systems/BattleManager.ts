@@ -373,11 +373,15 @@ export class BattleManager {
   }
 
   private flashSprite(sprite: Phaser.GameObjects.Sprite, color: number): void {
-    const orig = sprite.tintFill;
+    const origTint = sprite.tintTopLeft;
+    const hadTint = sprite.isTinted;
     sprite.setTint(color);
     this.scene.time.delayedCall(120, () => {
-      sprite.clearTint();
-      orig; // suppress
+      if (hadTint) {
+        sprite.setTint(origTint);
+      } else {
+        sprite.clearTint();
+      }
     });
   }
 }
